@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Dental Office Call System</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #calls { margin-top: 20px; }
+        .call { border: 1px solid #ccc; padding: 10px; margin-bottom: 5px; }
+        .flash { background-color: yellow; }
+        button { margin-right: 10px; padding: 10px 20px; }
+    </style>
+</head>
+<body>
+    <h1>Dental Office Call System</h1>
+    <div id="station"></div>
+    <button id="call-doc">Call Doctor</button>
+    <button id="call-asst">Call Assistant</button>
+    <button id="clear">Clear</button>
+    <button id="all-clear">All Clear (hold 3s)</button>
+    <div id="calls"></div>
+
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js" integrity="sha384-HX+KktVe/92pT9bkHmhFq9WlH0I1GtIsfRSAxEPPYUajFBl/MEGL3+rXhN3kCXZ8" crossorigin="anonymous"></script>
+    <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const station = urlParams.get('station') || 'Unknown';
+    document.getElementById('station').textContent = 'Station: ' + station;
+
+    const socket = io();
+
+    function beep() {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = ctx.createOscillator();
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(880, ctx.currentTime);
+        oscillator.connect(ctx.destination);
+        oscillator.start();
+        setTimeout(() => oscillator.stop(), 500);
+    }
+
+    const callDoc = document.getElementById('call-doc');
+    const callAsst = document.getElementById('call-asst');
+    const clearBtn = document.getElementById('clear');
+    const allClearBtn = document.getElementById('all-clear');
+    const callsDiv = document.getElementById('calls');
+    let chimePlaying = false;
+
+    callDoc.onclick = () => { socket.emit('call', { station, type: 'Doctor' }); };
+    callAsst.onclick = () => { socket.emit('call', { station, type: 'Assistant' }); };
+    clearBtn.onclick = () => { socket.emit('clear', { station }); };
+
+    let holdTimeout;
+    allClearBtn.addEventListener('mousedown', () => {
+        holdTimeout = setTimeout(() => socket.emit('clear_all', { station }), 3000);
+    });
+    ['mouseup','mouseleave'].forEach(evt => allClearBtn.addEventListener(evt, () => clearTimeout(holdTimeout)));
+
+    const calls = {}; // id -> {div, data, time}
+
+    socket.on('init', data => data.calls.forEach(addCall));
+    socket.on('call', addCall);
+    socket.on('clear', id => removeCall(id));
+    socket.on('clear_all', () => Object.keys(calls).forEach(removeCall));
+
+    function addCall(data) {
+        const id = data.id;
+        if (calls[id]) return;
+        const div = document.createElement('div');
+        div.className = 'call';
+        callsDiv.appendChild(div);
+        calls[id] = { div, data, time: Date.now() };
+        updateDiv(id);
+    }
+
+    function removeCall(id) {
+        const c = calls[id];
+        if (c) {
+            c.div.remove();
+            delete calls[id];
+        }
+    }
+
+    function updateDiv(id) {
+        const c = calls[id];
+        if (!c) return;
+        const elapsed = Math.floor((Date.now() - c.time) / 1000);
+        c.div.textContent = `${c.data.station} requests ${c.data.type} - ${elapsed}s ago`;
+        if (elapsed % 300 === 0 && elapsed > 0 && !chimePlaying) {
+            chimePlaying = true;
+            beep();
+            c.div.classList.add('flash');
+            setTimeout(() => { c.div.classList.remove('flash'); chimePlaying = false; }, 1000);
+        }
+    }
+
+    setInterval(() => Object.keys(calls).forEach(updateDiv), 1000);
+    </script>
+</body>
+</html>
